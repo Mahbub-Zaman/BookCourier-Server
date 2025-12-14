@@ -83,6 +83,8 @@ async function run() {
           }
         });
 
+
+
         // -------------------------
         // SAVE USER
         // -------------------------
@@ -161,6 +163,8 @@ async function run() {
             res.status(500).send({ error: "Failed to fetch books" });
           }
         });
+
+
         // -------------------------
         // GET LATEST 6 BOOKS
         // -------------------------
@@ -178,6 +182,7 @@ async function run() {
             res.status(500).send({ error: "Failed to fetch latest books" });
           }
         });
+
 
         // -----------------------------------------
         // Wishlist - Get books by array of IDs
@@ -316,6 +321,8 @@ async function run() {
             const result = await booksCollection.findOne({ _id: new ObjectId(id) });
             res.send(result);
         });
+
+
 
         // -------------------------
         // PLACE ORDER
@@ -809,7 +816,7 @@ async function run() {
           }
         });
 
-         // -------------------------
+        // -------------------------
         // Reviews Collection
         // -------------------------
         // POST /reviews - Add a review
@@ -858,7 +865,62 @@ async function run() {
           }
         });
 
+        // -------------------------
+        // GET USER STATS
+        // -------------------------
+        app.get("/user/stats", async (req, res) => {
+          const { email, userId } = req.query;
 
+          if (!email || !userId) {
+            return res.status(400).send({ error: "email and userId are required" });
+          }
+
+          try {
+            // Orders
+            const orders = await ordersCollection.find({
+              "customerDetails.email": email
+            }).toArray();
+
+            // Payments
+            const payments = await paymentsCollection.find({
+              "customer.email": email
+            }).toArray();
+
+            // Wishlist
+            const wishlistCount = await wishlistCollection.countDocuments({
+              userId
+            });
+
+            // Reviews
+            const reviews = await reviewsCollection.find({ email }).toArray();
+
+            // ✅ USER (Joined Date)
+            const user = await usersCollection.findOne({ email });
+
+            res.send({
+              totalOrders: orders.length,
+              paidOrders: orders.filter(o => o.paymentStatus === "paid").length,
+              totalSpent: payments.reduce((s, p) => s + (p.amount || 0), 0),
+              wishlistCount,
+              totalReviews: reviews.length,
+              avgRating:
+                reviews.length > 0
+                  ? (
+                      reviews.reduce((s, r) => s + r.rating, 0) / reviews.length
+                    ).toFixed(1)
+                  : 0,
+
+              // ✅ Joined date
+              joinedAt: user?.createdAt || null
+            });
+
+          } catch (error) {
+            console.error("User stats error:", error);
+            res.status(500).send({ error: "Failed to fetch user stats" });
+          }
+        });
+
+        
         // CHECK MONGODB CONNECTION
         await client.db("admin").command({ ping: 1 });
         console.log("MongoDB connected!");
