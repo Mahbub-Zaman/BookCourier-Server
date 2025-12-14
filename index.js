@@ -179,6 +179,57 @@ async function run() {
           }
         });
 
+        // -----------------------------------------
+        // Wishlist - Get books by array of IDs
+        // -----------------------------------------
+        // ADD OR REMOVE WISHLIST
+        app.post("/wishlist", async (req, res) => {
+          const { bookId, userId } = req.body;
+
+          if (!bookId || !userId) return res.status(400).send({ error: "bookId and userId required" });
+
+          try {
+            // Check if already in wishlist
+            const exists = await wishlistCollection.findOne({ bookId, userId });
+
+            if (exists) {
+              // Remove from wishlist
+              await wishlistCollection.deleteOne({ _id: exists._id });
+              return res.send({ message: "Book removed from wishlist", action: "removed" });
+            }
+
+            // Add to wishlist
+            const book = await booksCollection.findOne({ _id: new ObjectId(bookId) });
+            if (!book) return res.status(404).send({ error: "Book not found" });
+
+            await wishlistCollection.insertOne({
+              bookId,
+              userId,
+              bookDetails: book,
+              createdAt: new Date(),
+            });
+
+            res.send({ message: "Book added to wishlist", action: "added" });
+          } catch (err) {
+            console.error(err);
+            res.status(500).send({ error: "Failed to update wishlist" });
+          }
+        });
+
+        // GET WISHLIST BOOKS FOR A USER
+        app.get("/wishlist", async (req, res) => {
+          const { userId } = req.query;
+          if (!userId) return res.status(400).send({ error: "userId required" });
+
+          try {
+            const wishlist = await wishlistCollection.find({ userId }).toArray();
+            res.send(wishlist);
+          } catch (err) {
+            console.error(err);
+            res.status(500).send({ error: "Failed to fetch wishlist" });
+          }
+        });
+
 
         // CHECK MONGODB CONNECTION
         await client.db("admin").command({ ping: 1 });
