@@ -230,6 +230,93 @@ async function run() {
           }
         });
 
+        // -------------------------
+        // UPDATE A BOOK
+        // -------------------------
+        app.put("/books/:id", async (req, res) => {
+          const { id } = req.params;
+          const updatedData = req.body;
+
+          try {
+            // Only allow updating certain fields
+            const updateFields = {
+              bookName: updatedData.bookName,
+              author: updatedData.author,
+              status: updatedData.status,
+              price: updatedData.price,
+              image: updatedData.image,
+              category: updatedData.category,
+              publisher: updatedData.publisher,
+              yearOfPublishing: updatedData.yearOfPublishing,
+              totalPages: updatedData.totalPages,
+              review: updatedData.review,
+              rating: updatedData.rating,
+              updatedAt: new Date(),
+            };
+
+            const result = await booksCollection.updateOne(
+              { _id: new ObjectId(id) },
+              { $set: updateFields }
+            );
+
+            if (result.modifiedCount > 0) {
+              res.send({ success: true, message: "Book updated successfully" });
+            } else {
+              res.status(404).send({ error: "Book not found or no changes made" });
+            }
+          } catch (error) {
+            console.error("Error updating book:", error);
+            res.status(500).send({ error: "Failed to update book" });
+          }
+        });
+
+        // PUBLISH / UNPUBLISH BOOK
+        app.patch("/books/:id/status", async (req, res) => {
+          const bookId = req.params.id;
+          const { status } = req.body; // status: "publish" or "unpublish"
+
+          if (!status) return res.status(400).send({ error: "Status required" });
+
+          try {
+            const result = await booksCollection.updateOne(
+              { _id: new ObjectId(bookId) },
+              { $set: { status } }
+            );
+
+            res.send({ success: true, message: `Book ${status}ed successfully` });
+          } catch (err) {
+            console.error(err);
+            res.status(500).send({ error: "Failed to update status" });
+          }
+        });
+
+        // DELETE BOOK AND RELATED ORDERS
+        app.delete("/books/:id", async (req, res) => {
+          const bookId = req.params.id;
+
+          try {
+            // Delete the book
+            await booksCollection.deleteOne({ _id: new ObjectId(bookId) });
+
+            // Delete all orders related to this book
+            await ordersCollection.deleteMany({ bookId: new ObjectId(bookId) });
+
+            res.send({ success: true, message: "Book and related orders deleted" });
+          } catch (err) {
+            console.error(err);
+            res.status(500).send({ error: "Failed to delete book" });
+          }
+        });
+
+        // -------------------------
+        // GET SINGLE BOOK BY ID
+        // -------------------------
+        app.get('/book/:id', async (req, res) => {
+            const id = req.params.id;
+            const result = await booksCollection.findOne({ _id: new ObjectId(id) });
+            res.send(result);
+        });
+
 
         // CHECK MONGODB CONNECTION
         await client.db("admin").command({ ping: 1 });
