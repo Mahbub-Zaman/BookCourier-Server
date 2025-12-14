@@ -55,6 +55,34 @@ async function run() {
           }
         });
 
+        // -------------------------
+        // UPDATE USER ROLE
+        // -------------------------
+        app.patch("/users/:id/role", async (req, res) => {
+          const { id } = req.params;
+          const { role } = req.body;
+
+          if (!role || !["user", "librarian", "admin"].includes(role)) {
+            return res.status(400).send({ error: "Invalid role" });
+          }
+
+          try {
+            const result = await usersCollection.updateOne(
+              { _id: new ObjectId(id) },
+              { $set: { role } }
+            );
+
+            if (result.modifiedCount > 0) {
+              res.send({ success: true, message: `Role updated to ${role}` });
+            } else {
+              res.status(404).send({ error: "User not found or role unchanged" });
+            }
+          } catch (error) {
+            console.error("Error updating role:", error);
+            res.status(500).send({ error: "Failed to update role" });
+          }
+        });
+
 
         // CHECK MONGODB CONNECTION
         await client.db("admin").command({ ping: 1 });
