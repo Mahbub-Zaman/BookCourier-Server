@@ -118,6 +118,19 @@ async function run() {
             }
         });
 
+        // -------------------------
+        // GET ALL BOOKS (only published)
+        // -------------------------
+        app.get('/books', async (req, res) => {
+            try {
+                const result = await booksCollection.find({ status: "publish" }).toArray();
+                res.send(result);
+            } catch (error) {
+                console.error("Failed to fetch books:", error);
+                res.status(500).send({ error: "Failed to fetch books" });
+            }
+        });
+
 
         // CHECK MONGODB CONNECTION
         await client.db("admin").command({ ping: 1 });
