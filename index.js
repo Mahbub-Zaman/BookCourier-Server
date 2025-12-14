@@ -161,6 +161,23 @@ async function run() {
             res.status(500).send({ error: "Failed to fetch books" });
           }
         });
+        // -------------------------
+        // GET LATEST 6 BOOKS
+        // -------------------------
+        app.get('/latest-books', async (req, res) => {
+          try {
+            const latestBooks = await booksCollection
+              .find({ status: "publish" })   // only published
+              .sort({ addedAt: 1 })          // newest first
+              .limit(6)                       // latest 6 books
+              .toArray();
+
+            res.send(latestBooks);
+          } catch (err) {
+            console.error("Failed to fetch latest books:", err);
+            res.status(500).send({ error: "Failed to fetch latest books" });
+          }
+        });
 
 
         // CHECK MONGODB CONNECTION
