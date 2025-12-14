@@ -317,6 +317,244 @@ async function run() {
             res.send(result);
         });
 
+        // -------------------------
+        // PLACE ORDER
+        // -------------------------
+        app.post('/orders', async (req, res) => {
+          const { bookId, userId, librarianDetails, customerDetails } = req.body;
+
+          if (!bookId || !userId || !librarianDetails || !customerDetails) {
+            return res.status(400).send({ error: "Missing required fields" });
+          }
+
+          try {
+            const orderData = {
+          bookId: ObjectId.isValid(bookId) ? new ObjectId(bookId) : bookId,
+          userId: ObjectId.isValid(userId) ? new ObjectId(userId) : userId,
+          librarianDetails: {
+            email: librarianDetails.email || "unknown",
+            name: librarianDetails.name || "unknown",
+            photo: librarianDetails.photo || "https://via.placeholder.com/50",
+          },
+          customerDetails: {
+            email: customerDetails.email || "unknown",
+            name: customerDetails.name || "unknown",
+            photo: customerDetails.photo || "https://via.placeholder.com/50",
+          },
+          orderDate: new Date(),
+          Orderstatus: "pending",
+          paymentStatus: "unpaid",
+          createdAt: new Date(),
+        };
+
+
+            const result = await ordersCollection.insertOne(orderData);
+
+            res.send({ message: "Order placed successfully", insertedId: result.insertedId });
+          } catch (err) {
+            console.error(err);
+            res.status(500).send({ error: "Failed to place order" });
+          }
+        });
+
+        // Get orders for a specific user with book details, excluding cancelled
+        app.get('/orders', async (req, res) => {
+          const { email } = req.query; // customer email
+          if (!email) return res.status(400).send({ error: "Email query required" });
+
+          try {
+            const orders = await ordersCollection.aggregate([
+              { 
+                $match: { 
+                  "customerDetails.email": email,
+                  "Orderstatus": { $ne: "cancelled" } // <-- exclude cancelled orders
+                } 
+              },
+              {
+                $lookup: {
+                  from: "books",
+                  localField: "bookId",
+                  foreignField: "_id",
+                  as: "bookDetails",
+                },
+              },
+              { $unwind: "$bookDetails" }, // flatten array
+            ]).toArray();
+
+            res.send(orders);
+          } catch (err) {
+            console.error(err);
+            res.status(500).send({ error: "Failed to fetch orders" });
+          }
+        });
+
+        // Get orders for a specific librarian with book details
+        app.get("/librarian/orders", async (req, res) => {
+          try {
+            const { email } = req.query;
+            if (!email) return res.status(400).send({ error: "Email query required" });
+
+            const orders = await ordersCollection.aggregate([
+              {
+                $match: { "librarianDetails.email": email }
+              },
+              {
+                // Convert bookId to ObjectId if it's a string
+                $addFields: {
+                  bookObjectId: {
+                    $cond: [
+                      { $eq: [{ $type: "$bookId" }, "string"] },
+                      { $toObjectId: "$bookId" },
+                      "$bookId"
+                    ]
+                  }
+                }
+              },
+              {
+                $lookup: {
+                  from: "books",
+                  localField: "bookObjectId",
+                  foreignField: "_id",
+                  as: "bookDetails"
+                }
+              },
+              { $unwind: { path: "$bookDetails", preserveNullAndEmptyArrays: true } }
+            ]).toArray();
+
+            res.send(orders);
+          } catch (err) {
+            console.error("Error fetching librarian orders:", err);
+            res.status(500).send({ error: "Failed to fetch orders" });
+          }
+        });
+
+        // Cancel an order by order ID
+        app.delete("/orders/:id", async (req, res) => {
+          const { id } = req.params;
+
+          try {
+            const result = await ordersCollection.deleteOne({
+              _id: new ObjectId(id)
+            });
+
+            if (result.deletedCount === 1) {
+              res.send({ success: true, message: "Order cancelled successfully" });
+            } else {
+              res.status(404).send({ error: "Order not found" });
+            }
+          } catch (error) {
+            console.error("Cancel order error:", error);
+            res.status(500).send({ error: "Failed to cancel order" });
+          }
+        });
+        // GET SINGLE ORDER BY ID WITH BOOK DETAILS
+        app.get("/orders/:id", async (req, res) => {
+          try {
+            const id = req.params.id;
+
+            if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid order ID" });
+
+            const order = await ordersCollection.findOne({ _id: new ObjectId(id) });
+            if (!order) return res.status(404).send({ error: "Order not found" });
+
+            const bookId = ObjectId.isValid(order.bookId) ? new ObjectId(order.bookId) : order.bookId;
+            const book = await booksCollection.findOne({ _id: bookId });
+
+            if (!book) return res.status(404).send({ error: "Book not found" });
+
+            res.send({
+              ...order,
+              book: {
+                id: book._id,
+                name: book.bookName,
+                img: book.image || "",
+                price: book.price,
+              },
+            });
+          } catch (error) {
+            console.error("Server error:", error);
+            res.status(500).send({ error: error.message });
+          }
+        });
+
+        // GET ORDERS FOR A LIBRARIAN WITH BOOK DETAILS
+        app.get("/librarian/orders", async (req, res) => {
+            try {
+                const email = req.query.email;
+
+                const orders = await ordersCollection
+                    .aggregate([
+                        {
+                            $match: {
+                                "librarianDetails.email": email
+                            }
+                        },
+
+                        // convert bookId string → ObjectId
+                        {
+                            $addFields: {
+                                bookObjectId: { $toObjectId: "$bookId" }
+                            }
+                        },
+
+                        // JOIN with Books collection
+                        {
+                            $lookup: {
+                                from: "books",
+                                localField: "bookObjectId",
+                                foreignField: "_id",
+                                as: "bookDetails"
+                            }
+                        },
+
+                        { $unwind: "$bookDetails" }
+                    ])
+                    .toArray();
+
+                res.send(orders);
+            } catch (error) {
+                console.error("Error fetching librarian orders:", error);
+                res.status(500).send({ error: "Failed to fetch orders" });
+            }
+        });
+        // UPDATE ORDER STATUS
+        app.patch("/orders/:id/status", async (req, res) => {
+          const { id } = req.params;
+          const { status } = req.body;
+
+          if (!status) return res.status(400).send({ error: "Status is required" });
+
+          try {
+            const result = await ordersCollection.updateOne(
+              { _id: new ObjectId(id) },
+              { $set: { Orderstatus: status } } // <-- changed
+            );
+            res.send({ success: true, message: "Order status updated" });
+          } catch (error) {
+            console.error(error);
+            res.status(500).send({ error: "Failed to update order status" });
+          }
+        });
+        // CANCEL AN ORDER
+        app.delete("/orders/:id", async (req, res) => {
+          const { id } = req.params;
+
+          try {
+            const result = await ordersCollection.deleteOne({
+              _id: new ObjectId(id)
+            });
+
+            if (result.deletedCount === 1) {
+              res.send({ success: true, message: "Order cancelled successfully" });
+            } else {
+              res.status(404).send({ error: "Order not found" });
+            }
+          } catch (error) {
+            console.error("Cancel order error:", error);
+            res.status(500).send({ error: "Failed to cancel order" });
+          }
+        });
+
 
         // CHECK MONGODB CONNECTION
         await client.db("admin").command({ ping: 1 });
