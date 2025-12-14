@@ -142,6 +142,26 @@ async function run() {
             }
         });
 
+        // GET books added by a specific librarian
+        app.get('/librarian/books', async (req, res) => {
+          const { email } = req.query;
+
+          if (!email) {
+            return res.status(400).send({ error: "Email is required" });
+          }
+
+          try {
+            const books = await booksCollection
+              .find({ librarianEmail: email })
+              .toArray();
+
+            res.send(books);
+          } catch (error) {
+            console.error("Failed to fetch librarian books:", error);
+            res.status(500).send({ error: "Failed to fetch books" });
+          }
+        });
+
 
         // CHECK MONGODB CONNECTION
         await client.db("admin").command({ ping: 1 });
