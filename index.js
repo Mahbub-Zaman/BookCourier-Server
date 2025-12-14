@@ -99,6 +99,25 @@ async function run() {
             res.send(result);
         });
 
+        // -------------------------
+        // ADD NEW BOOK
+        // -------------------------
+        app.post("/books", async (req, res) => {
+            try {
+                const book = req.body;
+
+                if (!book.bookName || !book.author || !book.price) {
+                    return res.status(400).send({ error: "Missing required fields: bookName, author, price" });
+                }
+
+                const result = await booksCollection.insertOne(book);
+                res.send({ success: true, message: "Book added successfully", insertedId: result.insertedId });
+            } catch (error) {
+                console.error("Error inserting book:", error);
+                res.status(500).send({ error: "Failed to add book" });
+            }
+        });
+
 
         // CHECK MONGODB CONNECTION
         await client.db("admin").command({ ping: 1 });
