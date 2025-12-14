@@ -131,6 +131,17 @@ async function run() {
             }
         });
 
+        // GET all books (for admin/manage page)
+        app.get('/admin/books', async (req, res) => {
+            try {
+                const books = await booksCollection.find().toArray();
+                res.send(books);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ error: "Failed to fetch books" });
+            }
+        });
+
 
         // CHECK MONGODB CONNECTION
         await client.db("admin").command({ ping: 1 });
