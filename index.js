@@ -83,6 +83,22 @@ async function run() {
           }
         });
 
+        // -------------------------
+        // SAVE USER
+        // -------------------------
+        app.post('/users', async (req, res) => {
+            const newUser = req.body;
+            const email = req.body.email;
+
+            const existingUser = await usersCollection.findOne({ email });
+            if (existingUser) {
+                return res.send({ message: 'User already exists' });
+            }
+
+            const result = await usersCollection.insertOne(newUser);
+            res.send(result);
+        });
+
 
         // CHECK MONGODB CONNECTION
         await client.db("admin").command({ ping: 1 });
