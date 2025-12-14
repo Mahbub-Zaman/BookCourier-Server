@@ -42,7 +42,18 @@ async function run() {
         const wishlistCollection = db.collection("wishlist");
         const reviewsCollection = db.collection("reviews");
 
-        
+        // -------------------------
+        // GET ALL USERS
+        // -------------------------
+        app.get("/users", async (req, res) => {
+          try {
+            const users = await usersCollection.find().toArray();
+            res.send(users);
+          } catch (error) {
+            console.error("Error fetching users:", error);
+            res.status(500).send({ error: "Failed to fetch users" });
+          }
+        });
 
 
         // CHECK MONGODB CONNECTION
