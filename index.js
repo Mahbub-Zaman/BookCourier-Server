@@ -809,6 +809,55 @@ async function run() {
           }
         });
 
+         // -------------------------
+        // Reviews Collection
+        // -------------------------
+        // POST /reviews - Add a review
+        app.post("/reviews", async (req, res) => {
+          try {
+            const { bookId, userId, userName, userPhoto, rating, review, email } = req.body;
+
+            if (!bookId || !userId || !rating || !review)
+              return res.status(400).send({ error: "All fields are required" });
+
+            const newReview = {
+              bookId: String(bookId),      // store bookId as string
+              userId: String(userId),      // store userId as string
+              userName: userName || "Anonymous",
+              userPhoto: userPhoto || "https://via.placeholder.com/50",
+              email,
+              rating: Number(rating),
+              review,
+              createdAt: new Date(),
+            };
+
+            await reviewsCollection.insertOne(newReview);
+
+            res.send({ message: "Review added successfully" });
+          } catch (err) {
+            console.error("Error in /reviews POST:", err);
+            res.status(500).send({ error: "Failed to add review" });
+          }
+        });
+
+        // GET /reviews?bookId=xxx - Fetch reviews
+        app.get("/reviews", async (req, res) => {
+          try {
+            const { bookId } = req.query;
+            if (!bookId) return res.status(400).send({ error: "bookId required" });
+
+            const reviews = await reviewsCollection
+              .find({ bookId: String(bookId) })
+              .sort({ createdAt: -1 })
+              .toArray();
+
+            res.send(reviews);
+          } catch (err) {
+            console.error("Error in /reviews GET:", err);
+            res.status(500).send({ error: "Failed to fetch reviews" });
+          }
+        });
+
 
         // CHECK MONGODB CONNECTION
         await client.db("admin").command({ ping: 1 });
