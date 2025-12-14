@@ -555,6 +555,260 @@ async function run() {
           }
         });
 
+        // -------------------------
+        // RECORD PAYMENT
+        // -------------------------
+
+        app.post("/payment/:orderId", async (req, res) => {
+          const { orderId } = req.params;
+
+          try {
+            // Fetch order from DB
+            const order = await ordersCollection.findOne({ _id: new ObjectId(orderId) });
+            if (!order) return res.status(404).send({ error: "Order not found" });
+
+            if (order.paymentStatus === "paid") {
+              return res.status(400).send({ error: "Order already paid" });
+            }
+
+            // Amount in cents
+            const amount = order.bookDetails?.price ? Math.round(order.bookDetails.price * 100) : 0;
+
+            // Create payment intent
+            const paymentIntent = await stripe.paymentIntents.create({
+              amount,
+              currency: "usd",
+              metadata: { orderId: order._id.toString() },
+            });
+
+            res.send({
+              clientSecret: paymentIntent.client_secret,
+            });
+          } catch (error) {
+            console.error(error);
+            res.status(500).send({ error: "Failed to create payment intent" });
+          }
+        });
+        // CONFIRM PAYMENT AND UPDATE ORDER STATUS
+        app.post("/payment/confirm", async (req, res) => {
+          const { orderId, paymentIntentId } = req.body;
+
+          try {
+            const paymentRecord = {
+              orderId,
+              paymentIntentId,
+              createdAt: new Date(),
+            };
+
+            await client.db("BookCourier").collection("payments").insertOne(paymentRecord);
+
+            // Update order payment status
+            await ordersCollection.updateOne(
+              { _id: new ObjectId(orderId) },
+              { $set: { paymentStatus: "paid" } }
+            );
+
+            res.send({ success: true, message: "Payment confirmed" });
+          } catch (err) {
+            console.error(err);
+            res.status(500).send({ error: "Failed to confirm payment" });
+          }
+        });
+
+
+        // -------------------------
+        // CREATE CHECKOUT SESSION
+        // -------------------------
+        app.post('/create-checkout-session', async (req, res) => {
+          const { orderId, customerEmail } = req.body;
+
+          if (!orderId || !customerEmail) return res.status(400).send({ error: "Missing orderId or customerEmail" });
+
+          try {
+            const order = await ordersCollection.findOne({ _id: new ObjectId(orderId) });
+            if (!order) return res.status(404).send({ error: "Order not found" });
+
+            const book = await booksCollection.findOne({ _id: order.bookId });
+            if (!book) return res.status(404).send({ error: "Book not found" });
+
+            const session = await stripe.checkout.sessions.create({
+              payment_method_types: ["card"],
+              line_items: [{
+                price_data: {
+                  currency: "usd",
+                  product_data: { name: book.bookName },
+                  unit_amount: Math.round(book.price * 100)
+                },
+                quantity: 1
+              }],
+              mode: "payment",
+              customer_email: customerEmail,
+              metadata: { orderId: order._id.toString() },
+              success_url: `${process.env.SITE_DOMAIN}/dashboard/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+              cancel_url: `${process.env.SITE_DOMAIN}/dashboard/payment-cancelled`
+            });
+
+            res.send({ url: session.url });
+
+          } catch (err) {
+            console.error(err);
+            res.status(500).send({ error: err.message });
+          }
+        });
+
+        // -------------------------
+        // PAYMENT SUCCESS
+        // -------------------------
+        app.patch('/payment-success', async (req, res) => {
+          const { session_id } = req.query;
+          if (!session_id) return res.status(400).send({ error: "Session ID required" });
+
+          try {
+            const session = await stripe.checkout.sessions.retrieve(session_id);
+            const orderId = session.metadata?.orderId;
+            if (!orderId) return res.status(400).send({ error: "Order ID missing in session metadata" });
+
+            const order = await ordersCollection.findOne({ _id: new ObjectId(orderId) });
+            const book = await booksCollection.findOne({ _id: order.bookId });
+
+            if (!order || !book) return res.status(404).send({ error: "Order or Book not found" });
+
+            // Prevent duplicate payment records
+            const existingPayment = await paymentsCollection.findOne({ transactionId: session.payment_intent });
+            if (existingPayment) {
+              return res.send({ success: true, transactionId: existingPayment.transactionId });
+            }
+
+            // Update order payment status
+            await ordersCollection.updateOne(
+              { _id: new ObjectId(orderId) },
+              { $set: { paymentStatus: "paid" } }
+            );
+
+            // Insert payment record
+            const paymentRecord = {
+              orderId,
+              transactionId: session.payment_intent,
+              amount: session.amount_total / 100,
+              currency: session.currency,
+              paidAt: new Date(),
+              customer: {
+                name: order.customerDetails?.name,
+                email: order.customerDetails?.email,
+                photo: order.customerDetails?.photo || "https://via.placeholder.com/50"
+              },
+              product: {
+                name: book.bookName,
+                price: book.price,
+                image: book.image
+              }
+            };
+
+            const result = await paymentsCollection.insertOne(paymentRecord);
+
+            res.send({
+              success: true,
+              transactionId: session.payment_intent,
+              paymentInfo: result,
+              orderId
+            });
+
+          } catch (err) {
+            console.error(err);
+            res.status(500).send({ error: err.message });
+          }
+        });
+
+        // GET /payments?email=user@example.com
+        app.get("/payments", async (req, res) => {
+          const { email } = req.query;
+          if (!email) return res.status(400).send({ error: "Email query required" });
+
+          try {
+            // Fetch all payments for this customer
+            const payments = await paymentsCollection.find({ "customer.email": email }).toArray();
+
+            // Fetch all books
+            const books = await booksCollection.find().toArray();
+
+            // Attach book info to each payment
+            const paymentsWithBook = payments.map((payment) => {
+              // Assume payment has a field productName or similar to match book
+              const book = books.find((b) => b.bookName === payment.product?.name); 
+              return { ...payment, book };
+            });
+
+            res.send(paymentsWithBook);
+          } catch (err) {
+            console.error(err);
+            res.status(500).send({ error: "Failed to fetch payments" });
+          }
+        });
+
+        // GET /admin/payments  (Admin only)
+        // GET /admin/payments
+        const { ObjectId } = require("mongodb");
+
+        // GET /admin/payments
+        app.get("/admin/payments", async (req, res) => {
+          const { email } = req.query;
+          if (!email) return res.status(400).send({ error: "Email query required" });
+
+          try {
+            // 1️⃣ Check if user is admin
+            const admin = await usersCollection.findOne({ email });
+            if (!admin || admin.role !== "admin")
+              return res.status(403).send({ error: "Access denied" });
+
+            // 2️⃣ Fetch all collections
+            const payments = await paymentsCollection.find().toArray();
+            const orders = await ordersCollection.find().toArray();
+            const books = await booksCollection.find().toArray();
+            const users = await usersCollection.find().toArray();
+
+            // 3️⃣ Map payments → order → book → librarian
+            const transactions = payments.map((p) => {
+              const order = orders.find((o) => o._id.toString() === (p.orderId || ""));
+              const book =
+                order && order.bookId
+                  ? books.find((b) => b._id.toString() === order.bookId.toString())
+                  : null;
+
+              const customer =
+                users.find(
+                  (u) =>
+                    u._id.toString() === (p.customerId || "") ||
+                    u.email === p.customer?.email
+                ) || null;
+
+              const librarian = book
+                ? {
+                    displayName: book.librarianName,
+                    email: book.librarianEmail,
+                    photoURL: book.librarianImage,
+                    role: "librarian",
+                  }
+                : null;
+
+              return {
+                ...p,
+                orderId: order?._id || null,
+                book,
+                librarian,
+                customer,
+                paidAt: p.paidAt,
+                amount: p.amount,
+                transactionId: p.transactionId,
+              };
+            });
+
+            res.json(transactions);
+          } catch (err) {
+            console.error("Admin transactions error:", err);
+            res.status(500).send({ error: "Failed to fetch admin transactions" });
+          }
+        });
+
 
         // CHECK MONGODB CONNECTION
         await client.db("admin").command({ ping: 1 });
