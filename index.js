@@ -32,7 +32,7 @@ app.get('/', (req, res) => {
 
 async function run() {
     try {
-        await client.connect();
+        // await client.connect();
 
         const db = client.db('BookCourier');
         const booksCollection = db.collection('books');
@@ -819,7 +819,6 @@ async function run() {
         // -------------------------
         // Reviews Collection
         // -------------------------
-        // POST /reviews - Add a review
         app.post("/reviews", async (req, res) => {
           try {
             const { bookId, userId, userName, userPhoto, rating, review, email } = req.body;
@@ -862,6 +861,66 @@ async function run() {
           } catch (err) {
             console.error("Error in /reviews GET:", err);
             res.status(500).send({ error: "Failed to fetch reviews" });
+          }
+        });
+
+        // -------------------------
+        // ADMIN DASHBOARD STATS
+        // -------------------------
+        app.get("/admin/stats", async (req, res) => {
+          try {
+            // ===== USERS =====
+            const totalUsers = await usersCollection.countDocuments();
+            const regularUsers = await usersCollection.countDocuments({ role: "user" });
+            const librarians = await usersCollection.countDocuments({ role: "librarian" });
+            const admins = await usersCollection.countDocuments({ role: "admin" });
+
+            // ===== BOOKS =====
+            const totalBooks = await booksCollection.countDocuments();
+            const publishedBooks = await booksCollection.countDocuments({ status: "publish" });
+            const unpublishedBooks = await booksCollection.countDocuments({ status: "unpublish" });
+
+            // ===== ORDERS =====
+            const totalOrders = await ordersCollection.countDocuments();
+            const pendingOrders = await ordersCollection.countDocuments({ Orderstatus: "pending" });
+            const shippedOrders = await ordersCollection.countDocuments({ Orderstatus: "shipped" });
+            const deliveredOrders = await ordersCollection.countDocuments({ Orderstatus: "delivered" });
+
+            // ===== PAYMENTS =====
+            const totalTransactions = await paymentsCollection.countDocuments();
+
+            const payments = await paymentsCollection.find().toArray();
+            const totalRevenue = payments.reduce(
+              (sum, p) => sum + (p.amount || 0),
+              0
+            );
+
+            res.send({
+              users: {
+                total: totalUsers,
+                regular: regularUsers,
+                librarians,
+                admins,
+              },
+              books: {
+                total: totalBooks,
+                published: publishedBooks,
+                unpublished: unpublishedBooks,
+              },
+              orders: {
+                total: totalOrders,
+                pending: pendingOrders,
+                shipped: shippedOrders,
+                delivered: deliveredOrders,
+              },
+              transactions: {
+                total: totalTransactions,
+                totalRevenue,
+              },
+            });
+          } catch (error) {
+            console.error("Admin stats error:", error);
+            res.status(500).send({ error: "Failed to load admin stats" });
           }
         });
 
@@ -922,8 +981,8 @@ async function run() {
 
         
         // CHECK MONGODB CONNECTION
-        await client.db("admin").command({ ping: 1 });
-        console.log("MongoDB connected!");
+        // await client.db("admin").command({ ping: 1 });
+        // console.log("MongoDB connected!");
 
     } finally {}
 }
